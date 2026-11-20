@@ -10,7 +10,10 @@ It only runs when the Duck.ai URL contains a `q` parameter with text or a `bang`
 
 **🔗・Links**
 
-- [Install (Raw)](https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/duck-ai-auto-submit-shortcut.user.js)
+- [Install (Raw)](https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/DuckAIAutoSubmitShortcut.user.js)
+- [Greasy Fork](https://greasyfork.org/en/scripts/606511-duck-ai-auto-submit-search-shortcut)
+- [OpenUserJS](https://openuserjs.org/scripts/MrKoby07/Duck.ai_Auto-Submit_Search_Shortcut)
+
 
 **🚀・Installation**
 
@@ -25,4 +28,4 @@ The script checks for a prompt containing text and an enabled Send button. When 
 
 **📄・License**
 
-[MIT License](LICENSE)
+[MIT License](https://github.com/Master3307/duck-ai-auto-submit-shortcut/blob/master/LICENSE)
