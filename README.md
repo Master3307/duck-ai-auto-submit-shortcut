@@ -25,5 +25,4 @@ The script checks for a prompt containing text and an enabled Send button. When 
 
 **📄・License**
 
-MIT
-``` <citation src="2"></citation>
+[MIT License](LICENSE)
