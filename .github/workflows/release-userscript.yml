@@ -1,0 +1,240 @@
+name: Release userscript
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: userscript-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect userscript file
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          matches=()
+
+          for file in ./*.user.js; do
+            [ -f "$file" ] || continue
+            if grep -q '^// ==UserScript==$' "$file"; then
+              matches+=("$file")
+            fi
+          done
+
+          for file in ./*.js; do
+            [ -f "$file" ] || continue
+            [[ "$file" == *.user.js ]] && continue
+            if grep -q '^// ==UserScript==$' "$file"; then
+              matches+=("$file")
+            fi
+          done
+
+          if [ "${#matches[@]}" -eq 0 ]; then
+            echo "No userscript file found in the repository root."
+            exit 1
+          fi
+
+          if [ "${#matches[@]}" -gt 1 ]; then
+            echo "More than one userscript file was found. Keep exactly one userscript in the repository root or configure an explicit path."
+            printf 'Found: %s\n' "${matches[@]}"
+            exit 1
+          fi
+
+          found="${matches[0]}"
+          version="$(sed -nE 's|^[[:space:]]*//[[:space:]]*@version[[:space:]]+([^[:space:]]+).*|\1|p' "$found" | head -n 1)"
+
+          if [ -z "$version" ]; then
+            echo "No @version found in $found."
+            exit 1
+          fi
+
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$version'. Expected a SemVer-like version such as 1.2.3."
+            exit 1
+          fi
+
+          original_name="$(basename "$found")"
+
+          if [[ "$original_name" == *.user.js ]]; then
+            release_file="$found"
+            release_name="$original_name"
+          else
+            base_name="$(basename "$found" .js)"
+            release_name="${base_name}.user.js"
+            release_file="./$release_name"
+            cp "$found" "$release_file"
+          fi
+
+          echo "release_file=$release_file" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch remote tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+
+      - name: Inspect release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.detect.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag_commit=$(git rev-list -n 1 "$TAG")" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "tag_commit=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or validate tag
+        id: tag
+        if: steps.state.outputs.release_exists == 'false'
+        env:
+          TAG: ${{ steps.detect.outputs.tag }}
+          TAG_EXISTS: ${{ steps.state.outputs.tag_exists }}
+          TAG_COMMIT: ${{ steps.state.outputs.tag_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          expected_commit="$(git rev-parse HEAD)"
+
+          if [ "$TAG_EXISTS" = "true" ]; then
+            if [ "$TAG_COMMIT" != "$expected_commit" ]; then
+              echo "Tag $TAG already exists at $TAG_COMMIT, but this workflow is releasing $expected_commit."
+              echo "Bump @version before releasing a different commit."
+              exit 1
+            fi
+
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag -a "$TAG" "$expected_commit" -m "Release $TAG"
+            git push origin "refs/tags/$TAG"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "commit=$expected_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes
+        id: notes
+        if: steps.state.outputs.release_exists == 'false'
+        env:
+          CURRENT_TAG: ${{ steps.detect.outputs.tag }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_tag="$(git tag --merged HEAD --sort=-version:refname | grep -Fxv "$CURRENT_TAG" | head -n 1 || true)"
+          notes_file="$(mktemp)"
+
+          {
+            echo "## What's changed"
+            echo
+
+            if [ -n "$previous_tag" ]; then
+              git log "$previous_tag..HEAD" --pretty=format:'- %s (%h)'
+            else
+              git log HEAD --pretty=format:'- %s (%h)'
+            fi
+
+            echo
+            if [ -n "$previous_tag" ]; then
+              echo
+              echo "**Full Changelog**: ${REPOSITORY_URL}/compare/${previous_tag}...${CURRENT_TAG}"
+            fi
+          } > "$notes_file"
+
+          {
+            echo "file<<EOF"
+            cat "$notes_file"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          rm -f "$notes_file"
+
+      - name: Create release
+        if: steps.state.outputs.release_exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.detect.outputs.tag }}
+          RELEASE_NAME: ${{ steps.detect.outputs.release_name }}
+          RELEASE_FILE: ${{ steps.detect.outputs.release_file }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          notes_file="$(mktemp)"
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$notes_file" \
+            --latest=true \
+            --verify-tag \
+            "${RELEASE_FILE}#${RELEASE_NAME}"
+
+          rm -f "$notes_file"
+
+      - name: Write release summary
+        env:
+          TAG: ${{ steps.detect.outputs.tag }}
+          VERSION: ${{ steps.detect.outputs.version }}
+          RELEASE_NAME: ${{ steps.detect.outputs.release_name }}
+          RELEASE_EXISTS: ${{ steps.state.outputs.release_exists }}
+          TAG_COMMIT: ${{ steps.tag.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Userscript release"
+            echo
+            echo "- Release asset: \`$RELEASE_NAME\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Tag: \`$TAG\`"
+
+            if [ "$RELEASE_EXISTS" = "true" ]; then
+              echo "- Result: release already existed; nothing was changed."
+            else
+              echo "- Result: release created from \`${TAG_COMMIT:0:7}\` and marked as Latest."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
