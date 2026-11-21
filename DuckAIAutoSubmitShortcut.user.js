@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Duck.ai Auto-Submit Search Shortcut
 // @namespace    https://github.com/Master3307
-// @version      1.1.0
+// @version      1.2.1
 // @description  Automatically submits a prefilled Duck.ai prompt opened through a search shortcut URL
 // @author       MrKoby07
 // @license      MIT
@@ -19,41 +19,61 @@
   "use strict";
 
   const params = new URLSearchParams(window.location.search);
-  const hasShortcut = params.has("bang") || params.has("q");
 
-  if (!hasShortcut) return;
+  // Duck.ai may consume q and leave the prompt in the composer,
+  // while retaining bang=true in the URL.
+  if (!params.has("q") && !params.has("bang")) return;
 
-  const timeoutMs = 10_000;
-  const pollMs = 200;
+  const timeoutMs = 15_000;
+  const pollMs = 250;
   const startedAt = Date.now();
   let submitted = false;
 
-  const timer = window.setInterval(() => {
+  function trySubmit() {
     if (submitted || Date.now() - startedAt >= timeoutMs) {
-      window.clearInterval(timer);
-      return;
+      return true;
     }
 
-    const prompt = document.querySelector('textarea, input[type="text"]');
-    if (!prompt || !prompt.value.trim()) return;
+    const prompt = document.querySelector(
+      'textarea[name="user-prompt"], textarea[aria-label="Ask anything privately"], textarea',
+    );
 
-    const form = prompt.closest("form");
-    const sendButton =
-      form?.querySelector('button[type="submit"]') ||
-      document.querySelector(
-        'button[type="submit"], button[aria-label*="Send" i]',
-      );
+    if (!prompt || !prompt.value.trim()) return false;
+
+    const sendButton = document.querySelector('button[aria-label="Send"]');
 
     if (
       !sendButton ||
       sendButton.disabled ||
       sendButton.getAttribute("aria-disabled") === "true"
     ) {
-      return;
+      return false;
     }
 
     submitted = true;
-    window.clearInterval(timer);
     sendButton.click();
+    return true;
+  }
+
+  const observer = new MutationObserver(() => {
+    if (trySubmit()) {
+      observer.disconnect();
+      window.clearInterval(timer);
+    }
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+  });
+
+  const timer = window.setInterval(() => {
+    if (trySubmit()) {
+      observer.disconnect();
+      window.clearInterval(timer);
+    }
   }, pollMs);
+
+  trySubmit();
 })();
