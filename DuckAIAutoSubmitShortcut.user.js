@@ -8,8 +8,8 @@
 // @homepageURL  https://github.com/Master3307/duck-ai-auto-submit-shortcut
 // @supportURL   https://github.com/Master3307/duck-ai-auto-submit-shortcut/issues
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=duck.ai
-// @downloadURL  https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/duck-ai-auto-submit-shortcut.user.js
-// @updateURL    https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/duck-ai-auto-submit-shortcut.user.js
+// @downloadURL  https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/DuckAIAutoSubmitShortcut.user.js
+// @updateURL    https://github.com/Master3307/duck-ai-auto-submit-shortcut/raw/refs/heads/master/DuckAIAutoSubmitShortcut.user.js
 // @match        https://duck.ai/*
 // @run-at       document-idle
 // @grant        none
